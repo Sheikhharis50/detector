@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 // Structure to hold shared state
 struct ActivityState {
     active: Arc<AtomicBool>,  // Indicates if the user is active
+    last_activity: Arc<Mutex<Instant>>,  // Track the last activity time
     stop_signal: Arc<AtomicBool>,  // Indicates if the thread should stop
 }
 
@@ -17,6 +18,7 @@ impl ActivityState {
     fn new() -> Self {
         ActivityState {
             active: Arc::new(AtomicBool::new(false)),
+            last_activity: Arc::new(Mutex::new(Instant::now())),
             stop_signal: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -29,7 +31,6 @@ lazy_static! {
 
 // Function to start the event listener in a new thread
 fn start_listener(mut cx: FunctionContext) -> JsResult<JsUndefined> {
-    // Create or retrieve the current activity state
     let mut state_lock = STATE.lock().unwrap();
     if state_lock.is_some() {
         return cx.throw_error("Listener already running");
@@ -37,40 +38,48 @@ fn start_listener(mut cx: FunctionContext) -> JsResult<JsUndefined> {
 
     let state = ActivityState::new();
     let active_clone = Arc::clone(&state.active);
+    let last_activity_clone = Arc::clone(&state.last_activity);
     let stop_signal_clone = Arc::clone(&state.stop_signal);
 
     // Spawn a thread to listen for user activity
     thread::spawn(move || {
-        let mut last_activity = Instant::now();
-
         // The callback triggered by `rdev::listen`
         let callback = {
-            let active_clone_inner = Arc::clone(&active_clone); // Clone here
+            let active_clone_inner = Arc::clone(&active_clone);  // Clone for the callback
+            let last_activity_inner = Arc::clone(&last_activity_clone);  // Clone for the callback
             move |event: Event| {
                 match event.event_type {
                     EventType::KeyPress(_) | EventType::MouseMove { .. } | EventType::ButtonPress(_) => {
                         active_clone_inner.store(true, Ordering::Relaxed);
-                        last_activity = Instant::now();  // Update the last activity time
+                        let mut last_activity = last_activity_inner.lock().unwrap();
+                        *last_activity = Instant::now();  // Update the last activity time
                     },
                     _ => {}
                 }
             }
         };
 
-        // Listen for events while the stop signal is not set
+        // Start listening for events
         if let Err(error) = listen(callback) {
             println!("Error: {:?}", error);
         }
+    });
 
-        // Periodically check if the user has been inactive
+    // Spawn another thread to check inactivity
+    let active_clone_for_inactivity = Arc::clone(&state.active);
+    let last_activity_clone_for_inactivity = Arc::clone(&state.last_activity);
+    thread::spawn(move || {
         while !stop_signal_clone.load(Ordering::Relaxed) {
-            if last_activity.elapsed() > Duration::from_secs(10) {
-                active_clone.store(false, Ordering::Relaxed);  // Set active to false if 10 seconds of inactivity
+            {
+                let last_activity = last_activity_clone_for_inactivity.lock().unwrap();
+                if last_activity.elapsed() > Duration::from_secs(10) {
+                    active_clone_for_inactivity.store(false, Ordering::Relaxed);  // Set active to false if 10 seconds of inactivity
+                }
             }
             thread::sleep(Duration::from_secs(1));  // Check every second
         }
 
-        println!("Listener thread stopped.");
+        println!("Inactivity check stopped.");
     });
 
     *state_lock = Some(state);
@@ -101,8 +110,8 @@ fn stop_listener(mut cx: FunctionContext) -> JsResult<JsUndefined> {
 // Register the functions for the Neon module
 #[neon::main]
 fn main(mut cx: ModuleContext) -> NeonResult<()> {
-    cx.export_function("startListener", start_listener)?;
-    cx.export_function("isUserActive", is_user_active)?;
-    cx.export_function("stopListener", stop_listener)?;
+    cx.export_function("start", start_listener)?;
+    cx.export_function("isActive", is_user_active)?;
+    cx.export_function("stop", stop_listener)?;
     Ok(())
 }

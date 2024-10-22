@@ -1,16 +1,22 @@
-const userActivity = require('.');
+const hook = require('.');  // The compiled Neon addon
 
-// Start the user activity listener
-userActivity.startListener();
+// Start the listener
+hook.start();
 
-// Periodically check if the user is active
-setInterval(() => {
-    const isActive = userActivity.isUserActive();
-    console.log(`User is active: ${isActive}`);
-}, 2000);  // Check every 2 seconds
+// Function to check if the user is active
+function checkUserActivity() {
+    const isActive = hook.isActive();
+    console.log("User active:", isActive);
 
-// Stop the listener after some time (e.g., after 30 seconds)
+    // Check every 1 seconds
+    setTimeout(checkUserActivity, 1000);  // Adjust delay as needed
+}
+
+// Start checking user activity in an infinite loop
+checkUserActivity();
+
+// Optional: Stop listener after some time (e.g., 5 minutes)
 setTimeout(() => {
-    userActivity.stopListener();
-    console.log('Stopped listening for user activity.');
-}, 30000);  // Stop after 30 seconds
+    hook.stop();
+    console.log("Stopped listener.");
+}, 20 * 60 * 1000);  // Stop after 20 minutes
