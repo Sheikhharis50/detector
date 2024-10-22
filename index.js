@@ -1,7 +1,7 @@
-const hook = require('.');  // The compiled Neon addon
+const hook = require('.');
 
-// Start the listener
-hook.start();
+// Start the listener with a custom inactivity duration (e.g., 30 seconds)
+hook.start(1 * 10); // Pass the number of seconds after which the user is considered inactive
 
 // Function to check if the user is active
 function checkUserActivity() {

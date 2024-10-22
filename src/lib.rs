@@ -29,8 +29,10 @@ lazy_static! {
     static ref STATE: Mutex<Option<ActivityState>> = Mutex::new(None);
 }
 
-// Function to start the event listener in a new thread
+// Function to start the event listener in a new thread with custom duration
 fn start_listener(mut cx: FunctionContext) -> JsResult<JsUndefined> {
+    let duration_secs = cx.argument::<JsNumber>(0)?.value(&mut cx) as u64;  // Get the duration argument in seconds
+
     let mut state_lock = STATE.lock().unwrap();
     if state_lock.is_some() {
         return cx.throw_error("Listener already running");
@@ -65,15 +67,15 @@ fn start_listener(mut cx: FunctionContext) -> JsResult<JsUndefined> {
         }
     });
 
-    // Spawn another thread to check inactivity
+    // Spawn another thread to check inactivity based on custom duration
     let active_clone_for_inactivity = Arc::clone(&state.active);
     let last_activity_clone_for_inactivity = Arc::clone(&state.last_activity);
     thread::spawn(move || {
         while !stop_signal_clone.load(Ordering::Relaxed) {
             {
                 let last_activity = last_activity_clone_for_inactivity.lock().unwrap();
-                if last_activity.elapsed() > Duration::from_secs(10) {
-                    active_clone_for_inactivity.store(false, Ordering::Relaxed);  // Set active to false if 10 seconds of inactivity
+                if last_activity.elapsed() > Duration::from_secs(duration_secs) {
+                    active_clone_for_inactivity.store(false, Ordering::Relaxed);  // Set active to false after the custom duration
                 }
             }
             thread::sleep(Duration::from_secs(1));  // Check every second
